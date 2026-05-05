@@ -1,0 +1,12 @@
+{
+  "name": "duazon-soppiya-investor-app",
+  "private": true,
+  "scripts": {
+    "dev:api": "pnpm --dir apps/api dev",
+    "build:api": "pnpm --dir apps/api build",
+    "dev:merchant": "pnpm --dir apps/merchant-app dev",
+    "build:merchant": "pnpm --dir apps/merchant-app build",
+    "dev:investor": "pnpm --dir apps/investor-portal dev",
+    "build:investor": "pnpm --dir apps/investor-portal build"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "merchant-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rsbuild build",
+    "dev": "rsbuild dev",
+    "preview": "rsbuild preview",
+    "codegen": "graphql-codegen --config codegen.ts"
+  },
+  "dependencies": {
+    "@apollo/client": "^4.0.7",
+    "@module-federation/bridge-react": "^2.4.0",
+    "@soppiya/elementus": "^1.4.8",
+    "graphql": "^16.11.0",
+    "lucide-react": "^1.14.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-router-dom": "7.9.3"
+  },
+  "devDependencies": {
+    "@0no-co/graphqlsp": "^1.15.0",
+    "@graphql-codegen/cli": "^6.0.0",
+    "@graphql-codegen/schema-ast": "^5.0.0",
+    "@graphql-codegen/typescript-react-apollo": "^4.3.3",
+    "@graphql-typed-document-node/core": "^3.2.0",
+    "@module-federation/rsbuild-plugin": "^2.4.0",
+    "@parcel/watcher": "^2.5.1",
+    "@rsbuild/core": "^2.0.0",
+    "@rsbuild/plugin-react": "^2.0.0",
+    "@types/node": "^24.5.0",
+    "@types/react": "19.1.12",
+    "@types/react-dom": "19.1.9",
+    "typescript": "^5.9.3"
+  }
+}
