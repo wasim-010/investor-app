@@ -19,7 +19,10 @@ import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
 const API_BASE_URL =
-  import.meta.env.PUBLIC_DUAZON_API_URL ?? "http://127.0.0.1:4000";
+  import.meta.env.PUBLIC_APP_API_URL ??
+  import.meta.env.PUBLIC_DUAZON_API_URL ??
+  "http://127.0.0.1:4000";
+const MERCHANT_API_KEY = import.meta.env.PUBLIC_MERCHANT_API_KEY ?? "";
 
 type Overview = {
   assignedProducts: number;
@@ -112,6 +115,7 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       "content-type": "application/json",
+      ...(MERCHANT_API_KEY ? { "x-merchant-api-key": MERCHANT_API_KEY } : {}),
       ...init?.headers,
     },
   });
@@ -389,6 +393,7 @@ function App() {
         method: "DELETE",
         headers: {
           "content-type": "application/json",
+          ...(MERCHANT_API_KEY ? { "x-merchant-api-key": MERCHANT_API_KEY } : {}),
         },
         body: JSON.stringify({
           investorEmail: assignment.investorEmail,
@@ -539,8 +544,8 @@ function App() {
 
   return (
     <main className="app-shell">
-      <aside className="sidebar" aria-label="Duazon app navigation">
-        <div className="brand-mark">D</div>
+      <aside className="sidebar" aria-label="Investor app navigation">
+        <div className="brand-mark">I</div>
         <nav className="nav-list">
           <button className="nav-item active" type="button">
             Overview
@@ -564,10 +569,10 @@ function App() {
         <header className="page-header">
           <BlockStack gap={10}>
             <Text as="h1" size="lg" weight="bold">
-              Duazon investor app
+              Soppiya investor app
             </Text>
             <Text as="p" size="sm" color="secondary">
-              Assign Soppiya products to investors and track their product
+              Assign store products to investors and track their product
               performance from one merchant dashboard.
             </Text>
           </BlockStack>

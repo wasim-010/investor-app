@@ -9,8 +9,10 @@ import {
 import { FormEvent, useEffect, useState } from "react";
 
 const API_BASE_URL =
-  import.meta.env.PUBLIC_DUAZON_API_URL ?? "http://127.0.0.1:4000";
-const SESSION_STORAGE_KEY = "duazon_investor_session_email";
+  import.meta.env.PUBLIC_APP_API_URL ??
+  import.meta.env.PUBLIC_DUAZON_API_URL ??
+  "http://127.0.0.1:4000";
+const SESSION_STORAGE_KEY = "soppiya_investor_session";
 
 const formatMoney = (value: number) => `৳${value.toFixed(2)}`;
 
@@ -45,6 +47,10 @@ type InvestorDashboard = {
   assignments: Assignment[];
 };
 
+type InvestorLoginResponse = InvestorDashboard & {
+  session: string;
+};
+
 export function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -52,12 +58,12 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const loadDashboardByEmail = async (investorEmail: string) => {
-    const response = await fetch(
-      `${API_BASE_URL}/api/investor/dashboard?email=${encodeURIComponent(
-        investorEmail,
-      )}`,
-    );
+  const loadDashboardBySession = async (session: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/investor/dashboard`, {
+      headers: {
+        authorization: `Bearer ${session}`,
+      },
+    });
     const contentType = response.headers.get("content-type") ?? "";
 
     if (!response.ok) {
@@ -81,18 +87,18 @@ export function App() {
   };
 
   useEffect(() => {
-    const storedEmail = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    const storedSession = window.localStorage.getItem(SESSION_STORAGE_KEY);
 
-    if (!storedEmail) {
+    if (!storedSession) {
       return;
     }
 
-    setEmail(storedEmail);
     setLoading(true);
 
-    loadDashboardByEmail(storedEmail)
+    loadDashboardBySession(storedSession)
       .then((restoredDashboard) => {
         setDashboard(restoredDashboard);
+        setEmail(restoredDashboard.investor.email);
         setError("");
       })
       .catch((caughtError) => {
@@ -144,11 +150,8 @@ export function App() {
         );
       }
 
-      const nextDashboard = (await response.json()) as InvestorDashboard;
-      window.localStorage.setItem(
-        SESSION_STORAGE_KEY,
-        nextDashboard.investor.email,
-      );
+      const nextDashboard = (await response.json()) as InvestorLoginResponse;
+      window.localStorage.setItem(SESSION_STORAGE_KEY, nextDashboard.session);
       setDashboard(nextDashboard);
       setEmail(nextDashboard.investor.email);
       setPassword("");
@@ -197,7 +200,7 @@ export function App() {
     <main className="investor-shell">
       <section className={dashboard ? "hero-panel compact" : "hero-panel"}>
         <div>
-          <p className="eyebrow">Duazon Investors</p>
+          <p className="eyebrow">Investor Portal</p>
           <h1>
             {dashboard
               ? `Welcome, ${dashboard.investor.name || dashboard.investor.email}`

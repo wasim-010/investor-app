@@ -30,10 +30,21 @@ const dataDirectory = path.resolve(process.cwd(), "data");
 const assignmentsPath = path.join(dataDirectory, "assignments.json");
 const investorsPath = path.join(dataDirectory, "investors.json");
 let assignmentWriteQueue = Promise.resolve();
+let investorWriteQueue = Promise.resolve();
 
 async function withAssignmentWriteLock<T>(operation: () => Promise<T>) {
   const nextOperation = assignmentWriteQueue.then(operation, operation);
   assignmentWriteQueue = nextOperation.then(
+    () => undefined,
+    () => undefined,
+  );
+
+  return nextOperation;
+}
+
+async function withInvestorWriteLock<T>(operation: () => Promise<T>) {
+  const nextOperation = investorWriteQueue.then(operation, operation);
+  investorWriteQueue = nextOperation.then(
     () => undefined,
     () => undefined,
   );
@@ -117,6 +128,18 @@ export async function createAssignment(
 ) {
   return withAssignmentWriteLock(async () => {
     const assignments = await readAssignments();
+    const duplicateAssignment = assignments.find(
+      (assignment) =>
+        assignment.investorEmail.trim().toLowerCase() ===
+          input.investorEmail.trim().toLowerCase() &&
+        assignment.productId === input.productId &&
+        (assignment.variantId ?? "") === (input.variantId ?? ""),
+    );
+
+    if (duplicateAssignment) {
+      return duplicateAssignment;
+    }
+
     const assignment: Assignment = {
       ...input,
       id: crypto.randomUUID(),
@@ -175,15 +198,19 @@ export async function deleteAssignmentByIdentity(input: {
 
 export async function deleteInvestor(email: string) {
   const normalizedEmail = email.trim().toLowerCase();
-  const investors = await readInvestors();
-  const nextInvestors = investors.filter(
-    (investor) => investor.email.trim().toLowerCase() !== normalizedEmail,
-  );
-  const deletedInvestor = nextInvestors.length !== investors.length;
+  const deletedInvestor = await withInvestorWriteLock(async () => {
+    const investors = await readInvestors();
+    const nextInvestors = investors.filter(
+      (investor) => investor.email.trim().toLowerCase() !== normalizedEmail,
+    );
+    const investorDeleted = nextInvestors.length !== investors.length;
 
-  if (deletedInvestor) {
-    await writeInvestors(nextInvestors);
-  }
+    if (investorDeleted) {
+      await writeInvestors(nextInvestors);
+    }
+
+    return investorDeleted;
+  });
 
   const deletedAssignments = await withAssignmentWriteLock(async () => {
     const assignments = await readAssignments();
@@ -220,28 +247,30 @@ export async function createInvestor(input: {
   email: string;
   password: string;
 }) {
-  const investors = await readInvestors();
-  const normalizedEmail = input.email.trim().toLowerCase();
-  const existingInvestor = investors.find(
-    (investor) => investor.email.toLowerCase() === normalizedEmail,
-  );
+  return withInvestorWriteLock(async () => {
+    const investors = await readInvestors();
+    const normalizedEmail = input.email.trim().toLowerCase();
+    const existingInvestor = investors.find(
+      (investor) => investor.email.toLowerCase() === normalizedEmail,
+    );
 
-  if (existingInvestor) {
-    throw new Error("Investor already exists");
-  }
+    if (existingInvestor) {
+      throw new Error("Investor already exists");
+    }
 
-  const investor: Investor = {
-    id: crypto.randomUUID(),
-    name: input.name.trim(),
-    email: normalizedEmail,
-    passwordHash: await hashPassword(input.password),
-    createdAt: new Date().toISOString(),
-  };
+    const investor: Investor = {
+      id: crypto.randomUUID(),
+      name: input.name.trim(),
+      email: normalizedEmail,
+      passwordHash: await hashPassword(input.password),
+      createdAt: new Date().toISOString(),
+    };
 
-  investors.push(investor);
-  await writeInvestors(investors);
+    investors.push(investor);
+    await writeInvestors(investors);
 
-  return publicInvestor(investor);
+    return publicInvestor(investor);
+  });
 }
 
 export async function authenticateInvestor(email: string, password: string) {

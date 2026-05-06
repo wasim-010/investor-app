@@ -1,6 +1,12 @@
 import cors from "cors";
 import express from "express";
 import { z } from "zod";
+import {
+  createInvestorSession,
+  getInvestorSession,
+  requireInvestorSession,
+  requireMerchantAccess,
+} from "./auth.js";
 import { calculateSalesAnalytics } from "./analytics.js";
 import { config } from "./config.js";
 import {
@@ -57,7 +63,19 @@ app.get("/health", (_request, response) => {
   });
 });
 
-app.get("/api/merchant/overview", async (_request, response, next) => {
+app.get("/api/app/config", (_request, response) => {
+  response.json({
+    appName: config.appName,
+    appBaseDomain: config.appBaseDomain,
+    storeDomain: config.soppiyaStoreDomain,
+    investorPortalUrl:
+      config.soppiyaStoreDomain && config.appBaseDomain
+        ? `https://investor.${config.soppiyaStoreDomain}`
+        : "",
+  });
+});
+
+app.get("/api/merchant/overview", requireMerchantAccess, async (_request, response, next) => {
   try {
     const assignments = await listAssignments();
     const orderData = await getStoreOrders(100);
@@ -78,9 +96,9 @@ app.get("/api/merchant/overview", async (_request, response, next) => {
   }
 });
 
-app.get("/api/soppiya/products", async (request, response, next) => {
+app.get("/api/soppiya/products", requireMerchantAccess, async (request, response, next) => {
   try {
-    const first = Number(request.query.first ?? 20);
+    const first = z.coerce.number().int().min(1).max(250).parse(request.query.first ?? 20);
     const result = await getStoreProducts(first);
 
     response.json(result.products);
@@ -89,7 +107,7 @@ app.get("/api/soppiya/products", async (request, response, next) => {
   }
 });
 
-app.get("/api/assignments", async (_request, response, next) => {
+app.get("/api/assignments", requireMerchantAccess, async (_request, response, next) => {
   try {
     const assignments = await listAssignments();
     const orderData = await getStoreOrders(100);
@@ -104,7 +122,7 @@ app.get("/api/assignments", async (_request, response, next) => {
   }
 });
 
-app.get("/api/investors", async (_request, response, next) => {
+app.get("/api/investors", requireMerchantAccess, async (_request, response, next) => {
   try {
     response.json({ investors: await listInvestors() });
   } catch (error) {
@@ -118,7 +136,7 @@ const investorInput = z.object({
   password: z.string().min(6),
 });
 
-app.post("/api/investors", async (request, response, next) => {
+app.post("/api/investors", requireMerchantAccess, async (request, response, next) => {
   try {
     const input = investorInput.parse(request.body);
     const investor = await createInvestor(input);
@@ -129,9 +147,12 @@ app.post("/api/investors", async (request, response, next) => {
   }
 });
 
-app.delete("/api/investors/:email", async (request, response, next) => {
+app.delete("/api/investors/:email", requireMerchantAccess, async (request, response, next) => {
   try {
-    const email = z.string().email().parse(decodeURIComponent(request.params.email));
+    const email = z
+      .string()
+      .email()
+      .parse(decodeURIComponent(String(request.params.email)));
     const result = await deleteInvestor(email);
 
     if (!result.deleted) {
@@ -171,6 +192,10 @@ app.post("/api/investor/login", async (request, response, next) => {
     );
 
     response.json({
+      session: createInvestorSession({
+        email: investor.email,
+        name: investor.name,
+      }),
       investor,
       metrics: {
         assignedProducts: new Set(assignments.map((item) => item.productId)).size,
@@ -186,9 +211,10 @@ app.post("/api/investor/login", async (request, response, next) => {
   }
 });
 
-app.get("/api/investor/dashboard", async (request, response, next) => {
+app.get("/api/investor/dashboard", requireInvestorSession, async (_request, response, next) => {
   try {
-    const email = z.string().email().parse(request.query.email);
+    const session = getInvestorSession(response);
+    const email = session.email;
     const assignments = (await listAssignments()).filter(
       (assignment) =>
         assignment.investorEmail.toLowerCase() === email.toLowerCase(),
@@ -202,7 +228,7 @@ app.get("/api/investor/dashboard", async (request, response, next) => {
     response.json({
       investor: {
         email,
-        name: assignments[0]?.investorName ?? "",
+        name: assignments[0]?.investorName ?? session.name,
       },
       metrics: {
         assignedProducts: new Set(assignments.map((item) => item.productId)).size,
@@ -227,7 +253,7 @@ const assignmentInput = z.object({
   variantTitle: z.string().min(1).optional(),
 });
 
-app.post("/api/assignments", async (request, response, next) => {
+app.post("/api/assignments", requireMerchantAccess, async (request, response, next) => {
   try {
     const input = assignmentInput.parse(request.body);
     const assignment = await createAssignment(input);
@@ -238,9 +264,9 @@ app.post("/api/assignments", async (request, response, next) => {
   }
 });
 
-app.delete("/api/assignments/:id", async (request, response, next) => {
+app.delete("/api/assignments/:id", requireMerchantAccess, async (request, response, next) => {
   try {
-    let deleted = await deleteAssignment(request.params.id);
+    let deleted = await deleteAssignment(String(request.params.id));
 
     if (!deleted) {
       const fallbackInput = z

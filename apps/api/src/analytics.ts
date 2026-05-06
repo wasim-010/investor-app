@@ -35,12 +35,6 @@ export function calculateSalesAnalytics(
   assignments: Assignment[],
   orders: AnalyticsOrder[],
 ): SalesAnalytics {
-  const uniqueAssignments = new Map(
-    assignments.map((assignment) => [
-      `${assignment.productId}:${assignment.variantId ?? "*"}`,
-      assignment,
-    ]),
-  );
   const matchedOrderIds = new Set<string>();
   const assignmentOrderIds = new Map<string, Set<string>>();
   const assignmentSales = new Map<
@@ -59,7 +53,7 @@ export function calculateSalesAnalytics(
     }
 
     for (const lineItem of order.line_items) {
-      const matchedAssignments = Array.from(uniqueAssignments.values()).filter(
+      const matchedAssignments = assignments.filter(
         (assignment) => assignmentMatchesLineItem(assignment, lineItem),
       );
 
