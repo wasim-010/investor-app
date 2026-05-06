@@ -1,4 +1,5 @@
 import { config } from "./config.js";
+import { getInstalledStore } from "./store.js";
 
 type GraphResponse<T> = {
   data?: T;
@@ -16,18 +17,24 @@ export class SoppiyaGraphError extends Error {
 }
 
 export async function soppiyaGraph<TData>(
+  storeDomain: string,
   query: string,
   variables?: Record<string, unknown>,
 ): Promise<TData> {
-  if (!config.soppiyaStoreToken) {
-    throw new Error("SOPPIYA_STORE_TOKEN is not configured");
+  const installedStore = storeDomain
+    ? await getInstalledStore(storeDomain)
+    : null;
+  const accessToken = installedStore?.accessToken ?? config.soppiyaStoreToken;
+
+  if (!accessToken) {
+    throw new Error("No Soppiya store token is configured for this store");
   }
 
   const response = await fetch(config.soppiyaGraphUrl, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: config.soppiyaStoreToken,
+      authorization: accessToken,
     },
     body: JSON.stringify({ query, variables }),
   });
@@ -45,7 +52,7 @@ export async function soppiyaGraph<TData>(
   return body.data;
 }
 
-export async function getStoreProducts(first = 20) {
+export async function getStoreProducts(storeDomain: string, first = 20) {
   return soppiyaGraph<{
     products: {
       totalCount: number;
@@ -70,6 +77,7 @@ export async function getStoreProducts(first = 20) {
       }>;
     };
   }>(
+    storeDomain,
     `
       query MerchantProducts($first: Int) {
         products(first: $first) {
@@ -123,13 +131,14 @@ export type AnalyticsOrder = {
   }>;
 };
 
-export async function getStoreOrders(first = 100) {
+export async function getStoreOrders(storeDomain: string, first = 100) {
   return soppiyaGraph<{
     orders: {
       totalCount: number;
       edges: Array<{ node: AnalyticsOrder }>;
     };
   }>(
+    storeDomain,
     `
       query OrdersForAnalytics($first: Int) {
         orders(first: $first) {

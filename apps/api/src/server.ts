@@ -4,8 +4,10 @@ import { z } from "zod";
 import {
   createInvestorSession,
   getInvestorSession,
+  getMerchantStoreDomain,
   requireInvestorSession,
   requireMerchantAccess,
+  resolveStoreDomain,
 } from "./auth.js";
 import { calculateSalesAnalytics } from "./analytics.js";
 import { config } from "./config.js";
@@ -21,11 +23,32 @@ import {
   deleteAssignment,
   deleteAssignmentByIdentity,
   deleteInvestor,
+  installStore,
   listInvestors,
   listAssignments,
 } from "./store.js";
 
 const app = express();
+
+function isAllowedCorsOrigin(origin: string) {
+  if (config.corsOrigins.includes(origin)) {
+    return true;
+  }
+
+  if (!config.corsOriginSuffixes.length) {
+    return false;
+  }
+
+  try {
+    const hostname = new URL(origin).hostname.toLowerCase();
+
+    return config.corsOriginSuffixes.some(
+      (suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`),
+    );
+  } catch {
+    return false;
+  }
+}
 
 function withAssignmentSales(
   assignments: Awaited<ReturnType<typeof listAssignments>>,
@@ -49,7 +72,7 @@ app.use(
         return;
       }
 
-      callback(null, config.corsOrigins.includes(origin));
+      callback(null, isAllowedCorsOrigin(origin));
     },
   }),
 );
@@ -59,7 +82,7 @@ app.get("/health", (_request, response) => {
   response.json({
     ok: true,
     service: "soppiya-investor-api",
-    soppiyaGraphConfigured: Boolean(config.soppiyaStoreToken),
+    fallbackSoppiyaGraphConfigured: Boolean(config.soppiyaStoreToken),
   });
 });
 
@@ -75,10 +98,39 @@ app.get("/api/app/config", (_request, response) => {
   });
 });
 
-app.get("/api/merchant/overview", requireMerchantAccess, async (_request, response, next) => {
+const installStoreInput = z.object({
+  storeDomain: z.string().min(1),
+  storeId: z.string().min(1).optional(),
+  storeName: z.string().min(1).optional(),
+  accessToken: z.string().min(1),
+});
+
+app.post("/api/soppiya/install", async (request, response, next) => {
   try {
-    const assignments = await listAssignments();
-    const orderData = await getStoreOrders(100);
+    if (!config.soppiyaInstallSecret) {
+      response.status(500).json({ error: "SOPPIYA_INSTALL_SECRET is not configured" });
+      return;
+    }
+
+    if (request.header("x-soppiya-install-secret") !== config.soppiyaInstallSecret) {
+      response.status(401).json({ error: "Unauthorized install request" });
+      return;
+    }
+
+    const input = installStoreInput.parse(request.body);
+    const installedStore = await installStore(input);
+
+    response.status(201).json({ store: installedStore });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/merchant/overview", requireMerchantAccess, async (request, response, next) => {
+  try {
+    const storeDomain = getMerchantStoreDomain(request);
+    const assignments = await listAssignments(storeDomain);
+    const orderData = await getStoreOrders(storeDomain, 100);
     const analytics = calculateSalesAnalytics(
       assignments,
       orderData.orders.edges.map((edge) => edge.node),
@@ -98,8 +150,9 @@ app.get("/api/merchant/overview", requireMerchantAccess, async (_request, respon
 
 app.get("/api/soppiya/products", requireMerchantAccess, async (request, response, next) => {
   try {
+    const storeDomain = getMerchantStoreDomain(request);
     const first = z.coerce.number().int().min(1).max(250).parse(request.query.first ?? 20);
-    const result = await getStoreProducts(first);
+    const result = await getStoreProducts(storeDomain, first);
 
     response.json(result.products);
   } catch (error) {
@@ -107,10 +160,11 @@ app.get("/api/soppiya/products", requireMerchantAccess, async (request, response
   }
 });
 
-app.get("/api/assignments", requireMerchantAccess, async (_request, response, next) => {
+app.get("/api/assignments", requireMerchantAccess, async (request, response, next) => {
   try {
-    const assignments = await listAssignments();
-    const orderData = await getStoreOrders(100);
+    const storeDomain = getMerchantStoreDomain(request);
+    const assignments = await listAssignments(storeDomain);
+    const orderData = await getStoreOrders(storeDomain, 100);
     const analytics = calculateSalesAnalytics(
       assignments,
       orderData.orders.edges.map((edge) => edge.node),
@@ -122,9 +176,9 @@ app.get("/api/assignments", requireMerchantAccess, async (_request, response, ne
   }
 });
 
-app.get("/api/investors", requireMerchantAccess, async (_request, response, next) => {
+app.get("/api/investors", requireMerchantAccess, async (request, response, next) => {
   try {
-    response.json({ investors: await listInvestors() });
+    response.json({ investors: await listInvestors(getMerchantStoreDomain(request)) });
   } catch (error) {
     next(error);
   }
@@ -138,8 +192,9 @@ const investorInput = z.object({
 
 app.post("/api/investors", requireMerchantAccess, async (request, response, next) => {
   try {
+    const storeDomain = getMerchantStoreDomain(request);
     const input = investorInput.parse(request.body);
-    const investor = await createInvestor(input);
+    const investor = await createInvestor({ ...input, storeDomain });
 
     response.status(201).json({ investor });
   } catch (error) {
@@ -149,11 +204,12 @@ app.post("/api/investors", requireMerchantAccess, async (request, response, next
 
 app.delete("/api/investors/:email", requireMerchantAccess, async (request, response, next) => {
   try {
+    const storeDomain = getMerchantStoreDomain(request);
     const email = z
       .string()
       .email()
       .parse(decodeURIComponent(String(request.params.email)));
-    const result = await deleteInvestor(email);
+    const result = await deleteInvestor(storeDomain, email);
 
     if (!result.deleted) {
       response.status(404).json({ error: "Investor not found" });
@@ -167,6 +223,7 @@ app.delete("/api/investors/:email", requireMerchantAccess, async (request, respo
 });
 
 const investorLoginInput = z.object({
+  storeDomain: z.string().min(1).optional(),
   email: z.string().email(),
   password: z.string().min(1),
 });
@@ -174,18 +231,23 @@ const investorLoginInput = z.object({
 app.post("/api/investor/login", async (request, response, next) => {
   try {
     const input = investorLoginInput.parse(request.body);
-    const investor = await authenticateInvestor(input.email, input.password);
+    const storeDomain = (input.storeDomain ?? resolveStoreDomain(request)).toLowerCase();
+    const investor = await authenticateInvestor(
+      storeDomain,
+      input.email,
+      input.password,
+    );
 
     if (!investor) {
       response.status(401).json({ error: "Invalid email or password" });
       return;
     }
 
-    const assignments = (await listAssignments()).filter(
+    const assignments = (await listAssignments(storeDomain)).filter(
       (assignment) =>
         assignment.investorEmail.toLowerCase() === investor.email.toLowerCase(),
     );
-    const orderData = await getStoreOrders(100);
+    const orderData = await getStoreOrders(storeDomain, 100);
     const analytics = calculateSalesAnalytics(
       assignments,
       orderData.orders.edges.map((edge) => edge.node),
@@ -195,6 +257,7 @@ app.post("/api/investor/login", async (request, response, next) => {
       session: createInvestorSession({
         email: investor.email,
         name: investor.name,
+        storeDomain,
       }),
       investor,
       metrics: {
@@ -215,11 +278,12 @@ app.get("/api/investor/dashboard", requireInvestorSession, async (_request, resp
   try {
     const session = getInvestorSession(response);
     const email = session.email;
-    const assignments = (await listAssignments()).filter(
+    const storeDomain = session.storeDomain;
+    const assignments = (await listAssignments(storeDomain)).filter(
       (assignment) =>
         assignment.investorEmail.toLowerCase() === email.toLowerCase(),
     );
-    const orderData = await getStoreOrders(100);
+    const orderData = await getStoreOrders(storeDomain, 100);
     const analytics = calculateSalesAnalytics(
       assignments,
       orderData.orders.edges.map((edge) => edge.node),
@@ -255,8 +319,9 @@ const assignmentInput = z.object({
 
 app.post("/api/assignments", requireMerchantAccess, async (request, response, next) => {
   try {
+    const storeDomain = getMerchantStoreDomain(request);
     const input = assignmentInput.parse(request.body);
-    const assignment = await createAssignment(input);
+    const assignment = await createAssignment({ ...input, storeDomain });
 
     response.status(201).json({ assignment });
   } catch (error) {
@@ -266,6 +331,7 @@ app.post("/api/assignments", requireMerchantAccess, async (request, response, ne
 
 app.delete("/api/assignments/:id", requireMerchantAccess, async (request, response, next) => {
   try {
+    const storeDomain = getMerchantStoreDomain(request);
     let deleted = await deleteAssignment(String(request.params.id));
 
     if (!deleted) {
@@ -278,7 +344,10 @@ app.delete("/api/assignments/:id", requireMerchantAccess, async (request, respon
         .safeParse(request.body);
 
       if (fallbackInput.success) {
-        deleted = await deleteAssignmentByIdentity(fallbackInput.data);
+        deleted = await deleteAssignmentByIdentity({
+          ...fallbackInput.data,
+          storeDomain,
+        });
       }
     }
 

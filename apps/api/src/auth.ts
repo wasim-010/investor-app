@@ -6,6 +6,7 @@ import { config } from "./config.js";
 const sessionPayload = z.object({
   email: z.string().email(),
   name: z.string(),
+  storeDomain: z.string().min(1),
   exp: z.number(),
 });
 
@@ -35,7 +36,11 @@ function safeCompare(left: string, right: string) {
   );
 }
 
-export function createInvestorSession(input: { email: string; name: string }) {
+export function createInvestorSession(input: {
+  email: string;
+  name: string;
+  storeDomain: string;
+}) {
   if (!config.investorSessionSecret) {
     throw new Error("INVESTOR_SESSION_SECRET is not configured");
   }
@@ -43,6 +48,7 @@ export function createInvestorSession(input: { email: string; name: string }) {
   const payload: SessionPayload = {
     email: input.email,
     name: input.name,
+    storeDomain: input.storeDomain,
     exp: Math.floor(Date.now() / 1000) + config.investorSessionTtlSeconds,
   };
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
@@ -96,6 +102,26 @@ export function requireMerchantAccess(
   }
 
   next();
+}
+
+export function resolveStoreDomain(request: Request) {
+  return (
+    request.header("x-soppiya-store-domain") ??
+    request.query.storeDomain?.toString() ??
+    config.soppiyaStoreDomain
+  )
+    .trim()
+    .toLowerCase();
+}
+
+export function getMerchantStoreDomain(request: Request) {
+  const storeDomain = resolveStoreDomain(request);
+
+  if (!storeDomain) {
+    throw new Error("Store domain is required");
+  }
+
+  return storeDomain;
 }
 
 export function requireInvestorSession(

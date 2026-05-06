@@ -22,6 +22,9 @@ const API_BASE_URL =
   import.meta.env.PUBLIC_APP_API_URL ??
   "http://127.0.0.1:4000";
 const MERCHANT_API_KEY = import.meta.env.PUBLIC_MERCHANT_API_KEY ?? "";
+const STORE_DOMAIN =
+  import.meta.env.PUBLIC_STORE_DOMAIN ??
+  window.location.hostname.replace(/^merchant\./, "");
 
 type Overview = {
   assignedProducts: number;
@@ -115,6 +118,7 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     headers: {
       "content-type": "application/json",
       ...(MERCHANT_API_KEY ? { "x-merchant-api-key": MERCHANT_API_KEY } : {}),
+      ...(STORE_DOMAIN ? { "x-soppiya-store-domain": STORE_DOMAIN } : {}),
       ...init?.headers,
     },
   });
@@ -393,6 +397,7 @@ function App() {
         headers: {
           "content-type": "application/json",
           ...(MERCHANT_API_KEY ? { "x-merchant-api-key": MERCHANT_API_KEY } : {}),
+          ...(STORE_DOMAIN ? { "x-soppiya-store-domain": STORE_DOMAIN } : {}),
         },
         body: JSON.stringify({
           investorEmail: assignment.investorEmail,

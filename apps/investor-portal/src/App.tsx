@@ -12,6 +12,9 @@ const API_BASE_URL =
   import.meta.env.PUBLIC_APP_API_URL ??
   "http://127.0.0.1:4000";
 const SESSION_STORAGE_KEY = "soppiya_investor_session";
+const STORE_DOMAIN =
+  import.meta.env.PUBLIC_STORE_DOMAIN ??
+  window.location.hostname.replace(/^investor\./, "");
 
 const formatMoney = (value: number) => `৳${value.toFixed(2)}`;
 
@@ -61,6 +64,7 @@ export function App() {
     const response = await fetch(`${API_BASE_URL}/api/investor/dashboard`, {
       headers: {
         authorization: `Bearer ${session}`,
+        ...(STORE_DOMAIN ? { "x-soppiya-store-domain": STORE_DOMAIN } : {}),
       },
     });
     const contentType = response.headers.get("content-type") ?? "";
@@ -128,7 +132,11 @@ export function App() {
       const response = await fetch(`${API_BASE_URL}/api/investor/login`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: normalizedEmail, password }),
+        body: JSON.stringify({
+          storeDomain: STORE_DOMAIN,
+          email: normalizedEmail,
+          password,
+        }),
       });
       const contentType = response.headers.get("content-type") ?? "";
 

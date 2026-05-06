@@ -7,6 +7,7 @@ const scrypt = promisify(scryptCallback);
 
 export type Assignment = {
   id: string;
+  storeDomain: string;
   investorEmail: string;
   investorName: string;
   productId: string;
@@ -18,6 +19,7 @@ export type Assignment = {
 
 export type Investor = {
   id: string;
+  storeDomain: string;
   name: string;
   email: string;
   passwordHash: string;
@@ -26,11 +28,22 @@ export type Investor = {
 
 export type PublicInvestor = Omit<Investor, "passwordHash">;
 
+export type InstalledStore = {
+  storeDomain: string;
+  storeId?: string;
+  storeName?: string;
+  accessToken: string;
+  installedAt: string;
+  updatedAt: string;
+};
+
 const dataDirectory = path.resolve(process.cwd(), "data");
 const assignmentsPath = path.join(dataDirectory, "assignments.json");
 const investorsPath = path.join(dataDirectory, "investors.json");
+const installedStoresPath = path.join(dataDirectory, "installed-stores.json");
 let assignmentWriteQueue = Promise.resolve();
 let investorWriteQueue = Promise.resolve();
+let installedStoreWriteQueue = Promise.resolve();
 
 async function withAssignmentWriteLock<T>(operation: () => Promise<T>) {
   const nextOperation = assignmentWriteQueue.then(operation, operation);
@@ -50,6 +63,20 @@ async function withInvestorWriteLock<T>(operation: () => Promise<T>) {
   );
 
   return nextOperation;
+}
+
+async function withInstalledStoreWriteLock<T>(operation: () => Promise<T>) {
+  const nextOperation = installedStoreWriteQueue.then(operation, operation);
+  installedStoreWriteQueue = nextOperation.then(
+    () => undefined,
+    () => undefined,
+  );
+
+  return nextOperation;
+}
+
+function normalizeStoreDomain(storeDomain: string) {
+  return storeDomain.trim().toLowerCase();
 }
 
 async function readAssignments(): Promise<Assignment[]> {
@@ -88,6 +115,28 @@ async function writeInvestors(investors: Investor[]) {
   await writeFile(investorsPath, JSON.stringify(investors, null, 2), "utf8");
 }
 
+async function readInstalledStores(): Promise<InstalledStore[]> {
+  try {
+    const content = await readFile(installedStoresPath, "utf8");
+    return JSON.parse(content) as InstalledStore[];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+
+    throw error;
+  }
+}
+
+async function writeInstalledStores(installedStores: InstalledStore[]) {
+  await mkdir(dataDirectory, { recursive: true });
+  await writeFile(
+    installedStoresPath,
+    JSON.stringify(installedStores, null, 2),
+    "utf8",
+  );
+}
+
 function publicInvestor(investor: Investor): PublicInvestor {
   const { passwordHash: _passwordHash, ...safeInvestor } = investor;
   return safeInvestor;
@@ -115,12 +164,64 @@ async function verifyPassword(password: string, storedHash: string) {
   );
 }
 
-export async function listAssignments() {
+export async function installStore(input: {
+  storeDomain: string;
+  storeId?: string;
+  storeName?: string;
+  accessToken: string;
+}) {
+  return withInstalledStoreWriteLock(async () => {
+    const installedStores = await readInstalledStores();
+    const storeDomain = normalizeStoreDomain(input.storeDomain);
+    const now = new Date().toISOString();
+    const existingIndex = installedStores.findIndex(
+      (store) => store.storeDomain === storeDomain,
+    );
+    const installedStore: InstalledStore = {
+      storeDomain,
+      storeId: input.storeId,
+      storeName: input.storeName,
+      accessToken: input.accessToken,
+      installedAt:
+        existingIndex >= 0 ? installedStores[existingIndex].installedAt : now,
+      updatedAt: now,
+    };
+
+    if (existingIndex >= 0) {
+      installedStores[existingIndex] = installedStore;
+    } else {
+      installedStores.push(installedStore);
+    }
+
+    await writeInstalledStores(installedStores);
+
+    const { accessToken: _accessToken, ...safeStore } = installedStore;
+    return safeStore;
+  });
+}
+
+export async function getInstalledStore(storeDomain: string) {
+  const normalizedStoreDomain = normalizeStoreDomain(storeDomain);
+  const installedStores = await readInstalledStores();
+
+  return (
+    installedStores.find(
+      (store) => store.storeDomain === normalizedStoreDomain,
+    ) ?? null
+  );
+}
+
+export async function listAssignments(storeDomain: string) {
+  const normalizedStoreDomain = normalizeStoreDomain(storeDomain);
   const assignments = await readAssignments();
 
-  return assignments.sort((left, right) =>
-    right.createdAt.localeCompare(left.createdAt),
-  );
+  return assignments
+    .filter(
+      (assignment) =>
+        !assignment.storeDomain ||
+        assignment.storeDomain === normalizedStoreDomain,
+    )
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
 export async function createAssignment(
@@ -128,8 +229,10 @@ export async function createAssignment(
 ) {
   return withAssignmentWriteLock(async () => {
     const assignments = await readAssignments();
+    const storeDomain = normalizeStoreDomain(input.storeDomain);
     const duplicateAssignment = assignments.find(
       (assignment) =>
+        (assignment.storeDomain || storeDomain) === storeDomain &&
         assignment.investorEmail.trim().toLowerCase() ===
           input.investorEmail.trim().toLowerCase() &&
         assignment.productId === input.productId &&
@@ -142,6 +245,7 @@ export async function createAssignment(
 
     const assignment: Assignment = {
       ...input,
+      storeDomain,
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
     };
@@ -170,21 +274,24 @@ export async function deleteAssignment(id: string) {
 }
 
 export async function deleteAssignmentByIdentity(input: {
+  storeDomain: string;
   investorEmail: string;
   productId: string;
   variantId?: string;
 }) {
   return withAssignmentWriteLock(async () => {
     const assignments = await readAssignments();
+    const storeDomain = normalizeStoreDomain(input.storeDomain);
     const normalizedEmail = input.investorEmail.trim().toLowerCase();
     const nextAssignments = assignments.filter((assignment) => {
+      const sameStore = (assignment.storeDomain || storeDomain) === storeDomain;
       const sameInvestor =
         assignment.investorEmail.trim().toLowerCase() === normalizedEmail;
       const sameProduct = assignment.productId === input.productId;
       const sameVariant =
         (assignment.variantId ?? "") === (input.variantId ?? "");
 
-      return !(sameInvestor && sameProduct && sameVariant);
+      return !(sameStore && sameInvestor && sameProduct && sameVariant);
     });
 
     if (nextAssignments.length === assignments.length) {
@@ -196,12 +303,16 @@ export async function deleteAssignmentByIdentity(input: {
   });
 }
 
-export async function deleteInvestor(email: string) {
+export async function deleteInvestor(storeDomain: string, email: string) {
+  const normalizedStoreDomain = normalizeStoreDomain(storeDomain);
   const normalizedEmail = email.trim().toLowerCase();
   const deletedInvestor = await withInvestorWriteLock(async () => {
     const investors = await readInvestors();
     const nextInvestors = investors.filter(
-      (investor) => investor.email.trim().toLowerCase() !== normalizedEmail,
+      (investor) =>
+        (investor.storeDomain || normalizedStoreDomain) !==
+          normalizedStoreDomain ||
+        investor.email.trim().toLowerCase() !== normalizedEmail,
     );
     const investorDeleted = nextInvestors.length !== investors.length;
 
@@ -216,6 +327,8 @@ export async function deleteInvestor(email: string) {
     const assignments = await readAssignments();
     const nextAssignments = assignments.filter(
       (assignment) =>
+        (assignment.storeDomain || normalizedStoreDomain) !==
+          normalizedStoreDomain ||
         assignment.investorEmail.trim().toLowerCase() !== normalizedEmail,
     );
     const deletedCount = assignments.length - nextAssignments.length;
@@ -234,24 +347,34 @@ export async function deleteInvestor(email: string) {
   };
 }
 
-export async function listInvestors() {
+export async function listInvestors(storeDomain: string) {
+  const normalizedStoreDomain = normalizeStoreDomain(storeDomain);
   const investors = await readInvestors();
 
   return investors
+    .filter(
+      (investor) =>
+        !investor.storeDomain ||
+        investor.storeDomain === normalizedStoreDomain,
+    )
     .map(publicInvestor)
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 export async function createInvestor(input: {
+  storeDomain: string;
   name: string;
   email: string;
   password: string;
 }) {
   return withInvestorWriteLock(async () => {
     const investors = await readInvestors();
+    const storeDomain = normalizeStoreDomain(input.storeDomain);
     const normalizedEmail = input.email.trim().toLowerCase();
     const existingInvestor = investors.find(
-      (investor) => investor.email.toLowerCase() === normalizedEmail,
+      (investor) =>
+        (investor.storeDomain || storeDomain) === storeDomain &&
+        investor.email.toLowerCase() === normalizedEmail,
     );
 
     if (existingInvestor) {
@@ -260,6 +383,7 @@ export async function createInvestor(input: {
 
     const investor: Investor = {
       id: crypto.randomUUID(),
+      storeDomain,
       name: input.name.trim(),
       email: normalizedEmail,
       passwordHash: await hashPassword(input.password),
@@ -273,11 +397,18 @@ export async function createInvestor(input: {
   });
 }
 
-export async function authenticateInvestor(email: string, password: string) {
+export async function authenticateInvestor(
+  storeDomain: string,
+  email: string,
+  password: string,
+) {
+  const normalizedStoreDomain = normalizeStoreDomain(storeDomain);
   const normalizedEmail = email.trim().toLowerCase();
   const investors = await readInvestors();
   const investor = investors.find(
-    (item) => item.email.toLowerCase() === normalizedEmail,
+    (item) =>
+      (item.storeDomain || normalizedStoreDomain) === normalizedStoreDomain &&
+      item.email.toLowerCase() === normalizedEmail,
   );
 
   if (!investor || !(await verifyPassword(password, investor.passwordHash))) {

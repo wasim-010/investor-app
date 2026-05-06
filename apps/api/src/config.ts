@@ -8,6 +8,7 @@ export const config = {
   soppiyaStoreToken: process.env.SOPPIYA_STORE_TOKEN ?? "",
   soppiyaStoreDomain: process.env.SOPPIYA_STORE_DOMAIN ?? "",
   merchantApiKey: process.env.MERCHANT_API_KEY ?? "",
+  soppiyaInstallSecret: process.env.SOPPIYA_INSTALL_SECRET ?? "",
   investorSessionSecret: process.env.INVESTOR_SESSION_SECRET ?? "",
   investorSessionTtlSeconds: Number(
     process.env.INVESTOR_SESSION_TTL_SECONDS ?? 60 * 60 * 24 * 14,
@@ -15,5 +16,9 @@ export const config = {
   corsOrigins: (process.env.CORS_ORIGINS ?? "")
     .split(",")
     .map((origin) => origin.trim())
+    .filter(Boolean),
+  corsOriginSuffixes: (process.env.CORS_ORIGIN_SUFFIXES ?? "")
+    .split(",")
+    .map((origin) => origin.trim().replace(/^\./, "").toLowerCase())
     .filter(Boolean),
 };
