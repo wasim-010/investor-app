@@ -10,7 +10,6 @@ import { FormEvent, useEffect, useState } from "react";
 
 const API_BASE_URL =
   import.meta.env.PUBLIC_APP_API_URL ??
-  import.meta.env.PUBLIC_DUAZON_API_URL ??
   "http://127.0.0.1:4000";
 const SESSION_STORAGE_KEY = "soppiya_investor_session";
 

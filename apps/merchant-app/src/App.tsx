@@ -20,7 +20,6 @@ import "./App.css";
 
 const API_BASE_URL =
   import.meta.env.PUBLIC_APP_API_URL ??
-  import.meta.env.PUBLIC_DUAZON_API_URL ??
   "http://127.0.0.1:4000";
 const MERCHANT_API_KEY = import.meta.env.PUBLIC_MERCHANT_API_KEY ?? "";
 

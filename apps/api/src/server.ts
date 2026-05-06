@@ -58,7 +58,7 @@ app.use(express.json());
 app.get("/health", (_request, response) => {
   response.json({
     ok: true,
-    service: "duazon-soppiya-investor-api",
+    service: "soppiya-investor-api",
     soppiyaGraphConfigured: Boolean(config.soppiyaStoreToken),
   });
 });
@@ -312,5 +312,5 @@ app.use(
 );
 
 app.listen(config.port, () => {
-  console.log(`Duazon Soppiya API listening on http://127.0.0.1:${config.port}`);
+  console.log(`Soppiya investor API listening on http://127.0.0.1:${config.port}`);
 });
